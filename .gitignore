@@ -1,0 +1,17 @@
+# Cargo build trees
+/target/
+
+# Local cache layers
+.bustpacker_cache.txt
+
+# Standalone output directories
+/bpacks/
+/bunpacks/
+
+# Local environment variable locks
+.env
+.env*.local
+
+# System/OS trailing window files
+.DS_Store
+Thumbs.db
