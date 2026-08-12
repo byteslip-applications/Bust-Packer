@@ -50,6 +50,8 @@ fn is_secret_or_noise_name(path: &str) -> bool {
 
             | "credentials.json" | "service-account.json" | "id_rsa" | "id_ed25519"
             | ".npmrc" | ".pypirc"
+            | "cargo.lock" | "package-lock.json" | "pnpm-lock.yaml" | "yarn.lock"
+            | "poetry.lock" | "go.sum" | "composer.lock"
     ) || name.ends_with(".pem") || name.ends_with(".key") || name.contains("secret") || name.contains("credentials")
 }
 

@@ -5,17 +5,13 @@ mod task;
 mod path_cache;
 mod worker;
 mod top_bar;
+mod test_headless;
+mod agreement;
 mod license;
+
 use task::{Job, TaskMsg};
 
-pub fn run() -> Result<(), eframe::Error> {
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([820.0, 920.0])
-            .with_min_inner_size([640.0, 700.0])
-            .with_decorations(false),
-        ..Default::default()
-    };
+pub fn run_with_options(options: eframe::NativeOptions) -> Result<(), eframe::Error> {
     eframe::run_native(
         "Bust Packer",
         options,
@@ -102,7 +98,7 @@ impl BustPackerApp {
             }
         }
 
-        let license_data = license::get_bsl_text().to_string();
+        let license_data = agreement::get_eula_text().to_string();
 
         let mut app = Self {
             target_path: last,
@@ -148,7 +144,9 @@ impl BustPackerApp {
         }
         self.picker.items.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     }
+}
 
+impl BustPackerApp {
     fn refresh(&mut self) {
         if self.is_busy { return; }
         self.status = "Ready".to_string();
@@ -188,9 +186,7 @@ impl BustPackerApp {
             }
         }
     }
-}
 
-impl BustPackerApp {
     fn run_inspection(&mut self) {
         let path = self.target_path.trim().to_string();
         if path.is_empty() || !std::path::Path::new(&path).exists() {
@@ -214,34 +210,55 @@ impl BustPackerApp {
             let mut largest_file_name = String::new();
             let mut largest_file_size = 0;
 
-            if let Ok(entries) = std::fs::read_dir(p) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.is_file() {
-                        if let Ok(rel) = path.strip_prefix(p) {
-                            if worker::is_ignored_path_public(rel, &gitignore_patterns) {
-                                binary_files_count += 1;
+            fn walk_inspect(
+                dir: &std::path::Path,
+                root: &std::path::Path,
+                patterns: &[String],
+                text_count: &mut usize,
+                bin_count: &mut usize,
+                total_bytes: &mut usize,
+                total_lines: &mut usize,
+                largest_name: &mut String,
+                largest_size: &mut usize,
+            ) {
+                if let Ok(entries) = std::fs::read_dir(dir) {
+                    for entry in entries.flatten() {
+                        let path = entry.path();
+                        if let Ok(rel) = path.strip_prefix(root) {
+                            if worker::is_ignored_path_public(rel, patterns) {
+                                *bin_count += 1;
                                 continue;
                             }
-                            if let Ok(data) = std::fs::read(&path) {
-                                if crate::packer::is_binary_file(&path, &data) {
-                                    binary_files_count += 1;
-                                } else {
-                                    text_files_count += 1;
-                                    let size = data.len();
-                                    total_bytes += size;
-                                    if size > largest_file_size {
-                                        largest_file_size = size;
-                                        largest_file_name = rel.to_string_lossy().to_string();
+                            if path.is_dir() {
+                                walk_inspect(&path, root, patterns, text_count, bin_count, total_bytes, total_lines, largest_name, largest_size);
+                            } else if path.is_file() {
+                                if let Ok(data) = std::fs::read(&path) {
+                                    if crate::packer::is_binary_file(&path, &data) {
+                                        *bin_count += 1;
+                                    } else {
+                                        *text_count += 1;
+                                        let size = data.len();
+                                        *total_bytes += size;
+                                        if size > *largest_size {
+                                            *largest_size = size;
+                                            *largest_name = rel.to_string_lossy().to_string();
+                                        }
+                                        let content_str = String::from_utf8_lossy(&data);
+                                        *total_lines += content_str.lines().count();
                                     }
-                                    let content_str = String::from_utf8_lossy(&data);
-                                    total_lines += content_str.lines().count();
                                 }
                             }
                         }
                     }
                 }
             }
+
+            walk_inspect(
+                p, p, &gitignore_patterns,
+                &mut text_files_count, &mut binary_files_count,
+                &mut total_bytes, &mut total_lines,
+                &mut largest_file_name, &mut largest_file_size
+            );
 
             self.preview_stats = format!(
                 "=================================================================\n\
@@ -339,7 +356,7 @@ impl eframe::App for BustPackerApp {
                     ui.add_space(6.0);
 
                     let filter_lower = self.picker.search_filter.to_lowercase();
-                    egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                    egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
                         let items = self.picker.items.clone();
                         for (name, is_dir) in items {
                             if !filter_lower.is_empty() && !name.to_lowercase().contains(&filter_lower) {
@@ -375,6 +392,7 @@ impl eframe::App for BustPackerApp {
 
             if close_requested {
                 self.picker.show_picker = false;
+                self.run_inspection();
             }
         }
 
@@ -391,7 +409,7 @@ impl eframe::App for BustPackerApp {
                 ui.colored_label(egui::Color32::LIGHT_YELLOW, "⚠️ Action Required: This tool is distributed under a source-available enterprise model.");
                 ui.add_space(8.0);
 
-                egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
+                egui::ScrollArea::vertical().max_height(350.0).show(ui, |ui| {
                     ui.add(
                         egui::TextEdit::multiline(&mut self.license_text)
                             .font(egui::TextStyle::Monospace)
@@ -401,7 +419,7 @@ impl eframe::App for BustPackerApp {
                 });
 
                 ui.add_space(16.0);
-                if ui.button("I Accept & Acknowledge the BSL 1.1 Non-Commercial Terms").clicked() {
+                if ui.button("I Accept & Acknowledge the Terms").clicked() {
                     self.agreed_to_license = true;
                     path_cache::save_last_path(&self.target_path, true);
                 }
@@ -410,64 +428,106 @@ impl eframe::App for BustPackerApp {
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.add_space(4.0);
+            ui.add_space(8.0);
 
-            ui.horizontal(|ui| {
-                ui.label("Target Path:");
-                ui.text_edit_singleline(&mut self.target_path);
-                
-                if ui.button("📁 Browse Folder").clicked() {
-                    self.picker.target_mode_dir = true;
-                    self.picker.show_picker = true;
-                    self.update_picker_items();
-                }
-                if ui.button("📄 Browse File").clicked() {
-                    self.picker.target_mode_dir = false;
-                    self.picker.show_picker = true;
-                    self.update_picker_items();
-                }
+            ui.vertical(|ui| {
+                ui.label(egui::RichText::new("Target Path Configuration").strong().size(13.0));
+                ui.add_space(2.0);
+                ui.horizontal(|ui| {
+                    let text_edit = egui::TextEdit::singleline(&mut self.target_path)
+                        .margin(egui::vec2(8.0, 6.0))
+                        .desired_width(ui.available_width() - 250.0);
+                    if ui.add(text_edit).changed() {
+                        self.run_inspection();
+                    }
+                    
+                    ui.style_mut().spacing.button_padding = egui::vec2(10.0, 5.0);
+                    if ui.button("📁 Browse Folder").clicked() {
+                        self.picker.target_mode_dir = true;
+                        self.picker.show_picker = true;
+                        self.update_picker_items();
+                    }
+                    if ui.button("📄 Browse File").clicked() {
+                        self.picker.target_mode_dir = false;
+                        self.picker.show_picker = true;
+                        self.update_picker_items();
+                    }
+                });
             });
 
+            ui.add_space(12.0);
+            ui.separator();
             ui.add_space(8.0);
 
             ui.horizontal(|ui| {
                 ui.add_enabled_ui(!self.is_busy, |ui| {
-                    if ui.button("Run Inspect").clicked() {
+                    if ui.button("🔍 Run Inspect").clicked() {
                         self.run_inspection();
                     }
-                    if ui.button("Clear Log").clicked() {
+                    if ui.button("🗑️ Clear Log").clicked() {
                         self.refresh();
                     }
                 });
                 
-                ui.checkbox(&mut self.for_ai, "For AI");
+                ui.add_space(20.0);
+                ui.checkbox(&mut self.for_ai, egui::RichText::new("For AI Optimization").strong());
             });
 
+            ui.add_space(14.0);
+            
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Status:").strong());
+                ui.colored_label(egui::Color32::from_rgb(100, 180, 255), egui::RichText::new(&self.status).strong());
+            });
+            
             ui.add_space(12.0);
-            ui.label("Status: ");
-            ui.colored_label(egui::Color32::LIGHT_BLUE, &self.status);
-            
-            ui.add_space(8.0);
-            ui.label("Inspection Detailed Report:");
-            
-            egui::ScrollArea::vertical()
-                .max_height(260.0)
-                .id_salt("inspect_scroll")
-                .show(ui, |ui| {
-                    ui.add(
-                        egui::TextEdit::multiline(&mut self.preview_stats)
-                            .font(egui::TextStyle::Monospace)
-                            .desired_rows(12)
-                            .lock_focus(true)
-                    );
+
+            ui.columns(2, |columns| {
+                columns[0].vertical(|ui| {
+                    ui.label(egui::RichText::new("📋 Inspection Detailed Report").strong());
+                    ui.add_space(4.0);
+                    egui::ScrollArea::vertical()
+                        .max_height(240.0)
+                        .id_salt("inspect_scroll")
+                        .show(ui, |ui| {
+                            ui.add(
+                                egui::TextEdit::multiline(&mut self.preview_stats)
+                                    .font(egui::TextStyle::Monospace)
+                                    .desired_rows(12)
+                                    .desired_width(ui.available_width())
+                                    .lock_focus(true)
+                            );
+                        });
                 });
 
+                columns[1].vertical(|ui| {
+                    ui.label(egui::RichText::new("💻 Execution Log Terminal Output").strong());
+                    ui.add_space(4.0);
+                    egui::ScrollArea::vertical()
+                        .max_height(240.0)
+                        .id_salt("log_scroll")
+                        .show(ui, |ui| {
+                            ui.add(
+                                egui::TextEdit::multiline(&mut self.log)
+                                    .font(egui::TextStyle::Monospace)
+                                    .desired_rows(12)
+                                    .desired_width(ui.available_width())
+                                    .lock_focus(true)
+                            );
+                        });
+                });
+            });
+
+            ui.add_space(16.0);
+            ui.separator();
             ui.add_space(12.0);
 
             ui.horizontal(|ui| {
+                ui.style_mut().spacing.button_padding = egui::vec2(14.0, 8.0);
+                
                 if self.show_pack && !self.is_busy {
-                    let btn_label = if self.for_ai { "Pack to Monolithic Text File (-Prompt.txt)" } else { "Pack to Monolithic Text File (.txt)" };
-                    if ui.button(btn_label).clicked() {
+                    let btn_label = if self.for_ai { "⚡ Pack to Monolithic Text File (-Prompt.txt)" } else { "📦 Pack to Monolithic Text File (.txt)" };
+                    if ui.button(egui::RichText::new(btn_label).strong()).clicked() {
                         self.is_busy = true;
                         let _ = self.job_tx.send(Job::Pack {
                             path: self.target_path.clone(),
@@ -478,7 +538,7 @@ impl eframe::App for BustPackerApp {
                 }
 
                 if self.show_unpack && !self.is_busy {
-                    if ui.button("Unpack Project Monolithic File").clicked() {
+                    if ui.button(egui::RichText::new("🔓 Unpack Project Monolithic File").strong()).clicked() {
                         self.is_busy = true;
                         let _ = self.job_tx.send(Job::Unpack(self.target_path.clone()));
                     }
@@ -503,15 +563,38 @@ impl eframe::App for BustPackerApp {
                         };
                     }
                 }
+
+                if self.show_unpack && !self.last_output_file.is_empty() {
+                    if ui.button("📂 Open Unpacked Folder").clicked() {
+                        let (_, target_dir) = worker::get_project_internal_dirs();
+                        let _ = if cfg!(target_os = "windows") {
+                            std::process::Command::new("explorer").arg(&target_dir).spawn()
+                        } else if cfg!(target_os = "macos") {
+                            std::process::Command::new("open").arg(&target_dir).spawn()
+                        } else {
+                            std::process::Command::new("xdg-open").arg(&target_dir).spawn()
+                        };
+                    }
+                }
             });
 
-            ui.add_space(12.0);
-            ui.label("Operation Logs:");
-            egui::ScrollArea::vertical()
-                .id_salt("log_scroll")
-                .show(ui, |ui| {
-                    ui.label(&self.log);
+            ui.add_space(14.0);
+            ui.separator();
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.weak(license::get_bsl_text().lines().next().unwrap_or("Protected by BSL 1.1 — byteslip.org"));
                 });
+            });
         });
     }
+}
+
+pub fn run() -> Result<(), eframe::Error> {
+    let mut options = eframe::NativeOptions::default();
+    options.viewport = egui::ViewportBuilder::default()
+        .with_inner_size([950.0, 720.0])
+        .with_min_inner_size([750.0, 550.0])
+        .with_decorations(false); // Disables native system title bar headers completely
+    run_with_options(options)
 }
