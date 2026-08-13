@@ -38,6 +38,7 @@ cd Bust-Packer
 # Run the application
 cargo run --release
 
+```
 ### License
 
 This project is licensed under the **Business Source License 1.1**.
