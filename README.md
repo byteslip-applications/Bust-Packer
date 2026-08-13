@@ -52,10 +52,12 @@ The full license text is available in the `LICENSE` file and is also included in
 
 
 ###While using the AI prompted text monolithic text file:
--Use caution when pasting code into your terminal.
--The AI will be prompted to provide code that edits your project files via terminal commands.
--The terminal commands will also create a temporary log and copy the log automatically to your clipboard.
--The terminal commands will automatically delete the temporary log file after copying.
--Once you execute a command from the AI in your terminal, simply return to the AI and ctrl + v to paste into the chat to report the results back to the AI.
-***This is the most convenient way I have found for using AI assistants for project progression, even more so than actual coding terminal agents, but this is just my opinion.
-***What works for you will work best for you, and everyone has different experiences. I just found this one is very effective for the way I progress projects, and I have tried alot of ways.
+- Use caution when pasting code into your terminal.
+- The AI will be prompted to provide code that edits your project files via terminal commands.
+- The terminal commands will also create a temporary log and copy the log automatically to your clipboard.
+- The terminal commands will automatically delete the temporary log file after copying.
+- Once you execute a command from the AI in your terminal, simply return to the AI and ctrl + v to paste into the chat to report the results back to the AI.
+
+
+##This is the most convenient way I have found for using AI assistants for project progression, even more so than actual coding terminal agents, but this is just my opinion.
+##What works for you will work best for you, and everyone has different experiences. I just found this one is very effective for the way I progress projects, and I have tried alot of ways.
